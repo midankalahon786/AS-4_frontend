@@ -22,19 +22,38 @@ import { Button } from '@/components/ui/button';
 import { routePermissionsApi } from '@/services/roles-service';
 
 // ── Control panel service prefixes ────────────────────────────────────────────
-// Control Panel link is shown if the user has access to ANY route under these.
-const CONTROL_PANEL_PREFIXES = [
-    '/aabhar/v1/audit-logs',
-    '/aabhar/v1/departments',
-    '/aabhar/v1/designations',
+const WRITE_METHODS = ['POST:', 'PUT:', 'PATCH:', 'DELETE:'];
+
+const SELF_SERVICE_ROUTES = new Set([
+    // Auth
+    'POST:/aabhar/v1/auth/logout',
+    'POST:/aabhar/v1/auth/signup',
+    'POST:/aabhar/v1/auth/bulk-import',
+
+    // Employee self-service — notifications
+    'PUT:/aabhar/v1/employees/notifications/read-all',
+    'PUT:/aabhar/v1/employees/notifications/{notification_id}/read',
+
+    // Peer-review submission (not admin management)
+    'POST:/aabhar/v1/recognitions/reviews',
+    'PUT:/aabhar/v1/recognitions/reviews/{id}',
+
+    // Reward redemption
+    'POST:/aabhar/v1/rewards/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{catalog_id}/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{id}/redeem',
+]);
+
+const CONTROL_PANEL_WRITE_PREFIXES = [
+    '/aabhar/v1/organizations/departments',
+    '/aabhar/v1/organizations/designations',
+    '/aabhar/v1/organizations/statuses',
     '/aabhar/v1/employees',
-    '/aabhar/v1/reward-categories',
-    '/aabhar/v1/rewards',
-    '/aabhar/v1/review-categories',
-    '/aabhar/v1/reviews',
+    '/aabhar/v1/rewards/catalog',
+    '/aabhar/v1/rewards/categories',
+    '/aabhar/v1/recognitions/review-categories',
+    '/aabhar/v1/recognitions/reviews',
     '/aabhar/v1/roles',
-    '/aabhar/v1/statuses',
-    '/aabhar/v1/organizations',   // audit-logs may live here
 ];
 
 // ── Nav items ─────────────────────────────────────────────────────────────────
@@ -108,14 +127,12 @@ export default function Navbar() {
         ...(hasControlPanelAccess ? [CONTROL_PANEL_ITEM] : []),
     ];
 
-    // ── Determine Control Panel visibility via /my-permissions ────────────────
+    // ── Determine Control Panel visibility via role and /my-permissions ────────
     useEffect(() => {
         if (!user) return;
 
-        const userRoleCodes: string[] = user.roles ?? [];
-
-        // SUPER_ADMIN always gets full access — skip the API call
-        if (userRoleCodes.includes('SUPER_ADMIN')) {
+        // If user has an elevated admin role, grant access immediately
+        if (isAdminUser()) {
             setHasControlPanelAccess(true);
             return;
         }
@@ -124,24 +141,32 @@ export default function Navbar() {
             try {
                 // Calls GET /aabhar/v1/roles/my-permissions
                 // Returns string[] of route_keys the current user can access.
-                // This endpoint is always_public — auth required, no role check.
                 const myRouteKeys: string[] = await routePermissionsApi.getMyPermissions();
 
-                const canAccess = myRouteKeys.some((routeKey) => {
-                    // This route is granted to everyone, so it should not trigger 
-                    // the visibility of the Admin Control Panel.
-                    if (routeKey === 'GET:/aabhar/v1/roles/my-permissions') return false;
-                    
+                // Strip self-service routes before evaluating admin access
+                const adminKeys = myRouteKeys.filter((k) => !SELF_SERVICE_ROUTES.has(k));
+
+                const canAccess = adminKeys.some((routeKey) => {
                     const colonIdx = routeKey.indexOf(':');
                     if (colonIdx === -1) return false;
                     const path = routeKey.slice(colonIdx + 1);
-                    return CONTROL_PANEL_PREFIXES.some((prefix) => path.startsWith(prefix));
+
+                    // Audit logs: GET route is sufficient
+                    if (routeKey.startsWith('GET:') && path.startsWith('/aabhar/v1/organizations/audit-logs')) {
+                        return true;
+                    }
+
+                    // Other control panel modules require write methods
+                    return (
+                        WRITE_METHODS.some((m) => routeKey.startsWith(m)) &&
+                        CONTROL_PANEL_WRITE_PREFIXES.some((prefix) => path.startsWith(prefix))
+                    );
                 });
 
                 setHasControlPanelAccess(canAccess);
-            } catch (err){
-                console.error("Permission check failed:", err); // Log this to see the 404
-                setHasControlPanelAccess(false); // Silent fail — user simply won't see Control Panel link
+            } catch (err) {
+                console.error("Permission check failed:", err);
+                setHasControlPanelAccess(false);
             }
         })();
     }, [user]);

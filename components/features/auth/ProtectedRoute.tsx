@@ -51,6 +51,8 @@ const SELF_SERVICE_ROUTES = new Set([
 
     // Reward redemption
     'POST:/aabhar/v1/rewards/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{catalog_id}/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{id}/redeem',
 ]);
 
 interface ProtectedRouteProps {

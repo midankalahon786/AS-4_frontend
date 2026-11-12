@@ -9,6 +9,7 @@ import {
     Activity, ArrowUpRight
 } from 'lucide-react';
 import { auth } from '@/services/auth-service';
+import { isAdminUser } from '@/lib/role-utils';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { routePermissionsApi } from '@/services/roles-service';
 
@@ -135,6 +136,8 @@ const SELF_SERVICE_ROUTES = new Set([
 
     // Reward redemption
     'POST:/aabhar/v1/rewards/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{catalog_id}/redeem',
+    'POST:/aabhar/v1/rewards/catalog/{id}/redeem',
 ]);
 
 function cardIsAccessible(
@@ -174,6 +177,12 @@ export default function ControlPanelHub() {
     useEffect(() => {
         if (!user) { router.replace('/login'); return; }
 
+        // Normal users must never access the control panel
+        if (!isAdminUser()) {
+            router.replace('/dashboard');
+            return;
+        }
+
         const userRoleCodes: string[] = user.roles ?? [];
 
         if (userRoleCodes.includes('SUPER_ADMIN')) {
@@ -185,9 +194,12 @@ export default function ControlPanelHub() {
         (async () => {
             try {
                 const myKeys: string[] = await routePermissionsApi.getMyPermissions();
-                setVisibleCategories(
-                    categories.filter(cat => cardIsAccessible(cat, myKeys))
-                );
+                const accessible = categories.filter(cat => cardIsAccessible(cat, myKeys));
+                if (accessible.length === 0) {
+                    router.replace('/dashboard');
+                    return;
+                }
+                setVisibleCategories(accessible);
             } catch {
                 setVisibleCategories([]);
             } finally {
